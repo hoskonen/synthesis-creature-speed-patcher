@@ -21,7 +21,11 @@ Matched NPCs with `Use Stats` set receive no child override. Template links and 
 
 **Speed** is the final NPC movement speed value: 250 means write 250 to `Configuration.SpeedMultiplier`. Vanilla is typically 100. The saved settings property remains `SpeedMultiplier` for compatibility with existing settings files.
 
-Speed settings must be positive integers from 1 through 32767, matching the pinned Mutagen `Int16` API. Every group's settings are validated before any write. Default logs contain the run mode, per-group matches, planned changes, actual writes, already-correct records and overall skip totals. Enable **Verbose Record Logging** to see identities, changed speeds and template-skip reasons; template skips also include unrelated NPCs outside supported families because their effective race could not be established.
+Speed settings must be positive integers from 1 through 32767, matching the pinned Mutagen `Int16` API. Every group's settings are validated before any write. Per-group matched counts break down into would-change, already-correct, inherited-stat and disabled outcomes. Explicit exclusions are separate from matched; actual writes are an applied subset of would-change.
+
+The summary accounts for every inspected NPC as unmatched/unrelated, matched, explicitly excluded, relevant unresolved, or deleted. Unsupported template skips with no supported race evidence are included in unmatched/unrelated and shown only as a secondary diagnostic count. Missing links may hide membership, so this count does not certify that every such record is unrelated.
+
+**Verbose Record Logging** shows matched creatures, explicit exclusions and relevant template skips. Relevance uses exact supported race keys on the NPC or reachable winning trait-template/list records, including placeholder races as diagnostic hints. Traversal handles nested lists and cycles without selecting a branch for matching. This diagnostic evidence never makes an unsupported template patchable. Unrelated template skips are not logged individually; EditorIDs/names are never used to establish relevance.
 
 **Dry Run** defaults to off. Enable it to execute the same discovery, matching, template resolution, exclusion and stat-owner checks and build the same change plan, while leaving all output records untouched. Its summary reports how many overrides would be written and zero actual writes. Verbose logging is independent of dry run; either mode can produce per-record diagnostics or summaries only.
 

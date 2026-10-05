@@ -20,11 +20,14 @@ public sealed class PatchReport
     public int Inspected { get; internal set; }
     public int Deleted { get; internal set; }
     public int TemplateSkips { get; internal set; }
+    public int UnrelatedTemplateSkips { get; internal set; }
     public int Unmatched { get; internal set; }
     public Dictionary<string, GroupReport> Groups { get; } =
         CreatureGroupCatalog.Groups.ToDictionary(g => g.Id, _ => new GroupReport());
     public int TotalWritten => Groups.Values.Sum(g => g.Written);
     public int TotalWouldChange => Groups.Values.Sum(g => g.WouldChange);
+    public int TotalMatched => Groups.Values.Sum(g => g.Matched);
+    public int TotalExcluded => Groups.Values.Sum(g => g.Excluded);
 }
 
 public static class Patcher
@@ -66,8 +69,16 @@ public static class Patcher
             RaceResolution resolution = TemplateMatcher.ResolveRace(npc, cache);
             if (!resolution.Success)
             {
-                report.TemplateSkips++;
-                LogSkip(resolution.SkipReason!);
+                if (ReportingRelevance.HasSupportedRaceEvidence(npc, cache))
+                {
+                    report.TemplateSkips++;
+                    LogSkip($"relevant unresolved candidate: {resolution.SkipReason}");
+                }
+                else
+                {
+                    report.Unmatched++;
+                    report.UnrelatedTemplateSkips++;
+                }
                 continue;
             }
             if (!CreatureGroupCatalog.ByRace.TryGetValue(resolution.Race, out var group))
@@ -75,7 +86,7 @@ public static class Patcher
             GroupReport counts = report.Groups[group.Id];
             counts.Matched++;
             var desired = configured[group.Id];
-            if (!desired.Enabled) { counts.Disabled++; continue; }
+            if (!desired.Enabled) { counts.Disabled++; LogSkip($"{group.Name}: disabled"); continue; }
             if (!TemplateMatcher.OwnsStats(npc))
             {
                 counts.Inherited++;
@@ -83,7 +94,7 @@ public static class Patcher
                 continue;
             }
             short before = npc.Configuration.SpeedMultiplier;
-            if (before == desired.Speed) { counts.AlreadyCorrect++; continue; }
+            if (before == desired.Speed) { counts.AlreadyCorrect++; LogSkip($"{group.Name}: already correct ({before})"); continue; }
             plan.Add(new PlannedChange(npc, group, before, desired.Speed));
             counts.WouldChange++;
 
@@ -112,10 +123,16 @@ public static class Patcher
         {
             GroupReport c = report.Groups[group.Id];
             output.WriteLine(FormattableString.Invariant(
-                $"{group.Name}: matched={c.Matched}, would change={c.WouldChange}, written={c.Written}, already correct={c.AlreadyCorrect}, excluded={c.Excluded}, inherits stats={c.Inherited}, disabled={c.Disabled}"));
+                $"{group.Name}:\n  matched={c.Matched} (would change + already correct + inherits stats + disabled)\n  would change={c.WouldChange}; already correct={c.AlreadyCorrect}; inherits stats={c.Inherited}; disabled={c.Disabled}\n  actual writes={c.Written} (applied subset of would change)\n  explicit exclusions encountered={c.Excluded} (separate from matched)"));
         }
         output.WriteLine(FormattableString.Invariant(
-            $"Deleted={report.Deleted}; unresolved/ambiguous/unsupported templates={report.TemplateSkips}; unmatched={report.Unmatched}; total overrides that would be written={report.TotalWouldChange}; actual overrides written={report.TotalWritten}"));
+            $"Primary accounting: inspected={report.Inspected} = unmatched/unrelated={report.Unmatched} + matched candidates={report.TotalMatched} + explicit exclusions encountered={report.TotalExcluded} + relevant unresolved candidates={report.TemplateSkips} + deleted={report.Deleted}"));
+        output.WriteLine(FormattableString.Invariant(
+            $"Matched outcomes: would change={report.TotalWouldChange}; already correct={report.Groups.Values.Sum(g => g.AlreadyCorrect)}; inherits stats={report.Groups.Values.Sum(g => g.Inherited)}; disabled={report.Groups.Values.Sum(g => g.Disabled)}"));
+        output.WriteLine(FormattableString.Invariant(
+            $"Secondary diagnostic: template skips with no supported race evidence={report.UnrelatedTemplateSkips} (included in unmatched/unrelated; unresolved links may hide creature membership)"));
+        output.WriteLine(FormattableString.Invariant(
+            $"total overrides that would be written={report.TotalWouldChange}; actual overrides written={report.TotalWritten}"));
         return report;
     }
 }

@@ -124,7 +124,7 @@ public sealed class PatcherTests
         StringAssert.Contains(dryLog.ToString(), "mode = DRY RUN");
         StringAssert.Contains(dryLog.ToString(), "total overrides that would be written=6; actual overrides written=0");
         StringAssert.Contains(dryLog.ToString(), "already correct=1");
-        StringAssert.Contains(dryLog.ToString(), "excluded=1");
+        StringAssert.Contains(dryLog.ToString(), "explicit exclusions encountered=1 (separate from matched)");
     }
 
     [TestMethod]
@@ -152,6 +152,85 @@ public sealed class PatcherTests
                 Assert.AreEqual((short)100, npc.Configuration.SpeedMultiplier);
             }
         }
+    }
+
+    [TestMethod]
+    public void UnsupportedTemplateDiagnosticsUseRaceEvidenceWithoutEnablingMatches()
+    {
+        var mod = Mod();
+        var spider = AddNpc(mod);
+        var unrelated = AddNpc(mod, "0131F3:Skyrim.esm");
+        var ordinaryList = new LeveledNpc(mod) { Entries = new() };
+        ordinaryList.Entries.Add(new LeveledNpcEntry
+        {
+            Data = new LeveledNpcEntryData { Reference = new FormLink<INpcSpawnGetter>(unrelated.FormKey) }
+        });
+        mod.LeveledNpcs.Add(ordinaryList);
+        var mixedList = new LeveledNpc(mod) { Entries = new() };
+        mixedList.Entries.Add(new LeveledNpcEntry
+        {
+            Data = new LeveledNpcEntryData { Reference = new FormLink<INpcSpawnGetter>(ordinaryList.FormKey) }
+        });
+        mixedList.Entries.Add(new LeveledNpcEntry
+        {
+            Data = new LeveledNpcEntryData { Reference = new FormLink<INpcSpawnGetter>(spider.FormKey) }
+        });
+        mod.LeveledNpcs.Add(mixedList);
+        var guard = AddNpc(mod, "0131F3:Skyrim.esm");
+        guard.EditorID = "FrostbiteSpiderNameIsNotEvidence";
+        guard.Template.SetTo(ordinaryList.FormKey);
+        guard.Configuration.TemplateFlags = NpcConfiguration.TemplateFlag.Traits;
+        var candidate = AddNpc(mod, "0131F3:Skyrim.esm");
+        candidate.Template.SetTo(mixedList.FormKey);
+        candidate.Configuration.TemplateFlags = NpcConfiguration.TemplateFlag.Traits;
+        var missing = AddNpc(mod, "0131F3:Skyrim.esm");
+        missing.Template.SetTo(Key("099999:Input.esp"));
+        missing.Configuration.TemplateFlags = NpcConfiguration.TemplateFlag.Traits;
+        var placeholder = AddNpc(mod);
+        placeholder.Configuration.TemplateFlags = NpcConfiguration.TemplateFlag.Traits;
+        using var cache = mod.ToImmutableLinkCache();
+        var settings = Faster();
+        settings.DryRun = true;
+        settings.VerboseLogging = true;
+        var patch = Mod("Output.esp");
+        var log = new StringWriter();
+        var report = Patcher.Run(mod.Npcs, cache, patch, settings, log);
+        Assert.AreEqual(1, report.TotalMatched);
+        Assert.AreEqual(1, report.TotalWouldChange);
+        Assert.AreEqual(2, report.TemplateSkips);
+        Assert.AreEqual(2, report.UnrelatedTemplateSkips);
+        Assert.AreEqual(3, report.Unmatched);
+        Assert.AreEqual(0, patch.Npcs.Count);
+        Assert.IsFalse(log.ToString().Contains($"SKIP {guard.FormKey} "));
+        Assert.IsFalse(log.ToString().Contains($"SKIP {missing.FormKey} "));
+        StringAssert.Contains(log.ToString(), $"SKIP {candidate.FormKey} ");
+        StringAssert.Contains(log.ToString(), $"SKIP {placeholder.FormKey} ");
+        StringAssert.Contains(log.ToString(), "relevant unresolved candidate: leveled-list trait template");
+    }
+
+    [TestMethod]
+    public void SummarySeparatesMatchedOutcomesExclusionsAndSecondaryDiagnostics()
+    {
+        var mod = Mod();
+        var provider = AddNpc(mod);
+        AddNpc(mod, speed: 250);
+        var inherited = AddNpc(mod);
+        inherited.Template.SetTo(provider.FormKey);
+        inherited.Configuration.TemplateFlags = NpcConfiguration.TemplateFlag.Stats;
+        AddNpc(mod, identity: "038A33:Skyrim.esm");
+        var missing = AddNpc(mod, "0131F3:Skyrim.esm");
+        missing.Configuration.TemplateFlags = NpcConfiguration.TemplateFlag.Traits;
+        using var cache = mod.ToImmutableLinkCache();
+        var log = new StringWriter();
+        var report = Patcher.Run(mod.Npcs, cache, Mod("Output.esp"), Faster(), log);
+        Assert.AreEqual(report.Inspected, report.Unmatched + report.TotalMatched
+            + report.TotalExcluded + report.TemplateSkips + report.Deleted);
+        foreach (var counts in report.Groups.Values)
+            Assert.AreEqual(counts.Matched, counts.WouldChange + counts.AlreadyCorrect + counts.Inherited + counts.Disabled);
+        StringAssert.Contains(log.ToString(), "matched=3 (would change + already correct + inherits stats + disabled)");
+        StringAssert.Contains(log.ToString(), "explicit exclusions encountered=1 (separate from matched)");
+        StringAssert.Contains(log.ToString(), "matched candidates=3");
+        StringAssert.Contains(log.ToString(), "template skips with no supported race evidence=1 (included in unmatched/unrelated");
     }
 
     [TestMethod]
