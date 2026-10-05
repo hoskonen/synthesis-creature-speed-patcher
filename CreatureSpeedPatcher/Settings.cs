@@ -16,6 +16,9 @@ public sealed class Settings
     public GroupSettings ChaurusHunters { get; set; } = new(100);
     [SynthesisSettingName("Frozen Chaurus")]
     public GroupSettings FrozenChaurus { get; set; } = new(120);
+    [SynthesisSettingName("Dry Run")]
+    [SynthesisTooltip("Evaluate and report planned changes without creating or modifying output records.")]
+    public bool DryRun { get; set; }
     [SynthesisSettingName("Verbose Record Logging")]
     public bool VerboseLogging { get; set; }
 }
@@ -27,6 +30,8 @@ public sealed class GroupSettings
     public bool Enabled { get; set; } = true;
     // Int settings allow invalid JSON numbers to be validated before any writes.
     [Range(1, short.MaxValue)]
-    [SynthesisSettingName("Speed Multiplier")]
+    // Retain the serialized property name for existing settings files.
+    [SynthesisSettingName("Speed")]
+    [SynthesisTooltip("Final NPC movement speed value. Vanilla is typically 100.")]
     public int SpeedMultiplier { get; set; } = 100;
 }

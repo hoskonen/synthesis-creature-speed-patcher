@@ -1,0 +1,5 @@
+{
+  "Nickname": "Creature Speed Patcher",
+  "Visibility": "Visible",
+  "OneLineDescription": "Configurable creature movement-speed patcher using race-aware and template-aware NPC matching."
+}

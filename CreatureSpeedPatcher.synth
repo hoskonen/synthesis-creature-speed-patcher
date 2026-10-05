@@ -1,0 +1,6 @@
+{
+  "AddGitPatcher": {
+    "Url": "https://github.com/hoskonen/synthesis-creature-speed-patcher",
+    "SelectedProject": "CreatureSpeedPatcher/CreatureSpeedPatcher.csproj"
+  }
+}

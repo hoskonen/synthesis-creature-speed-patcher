@@ -7,6 +7,7 @@ namespace CreatureSpeedPatcher;
 public sealed class GroupReport
 {
     public int Matched { get; internal set; }
+    public int WouldChange { get; internal set; }
     public int Written { get; internal set; }
     public int AlreadyCorrect { get; internal set; }
     public int Excluded { get; internal set; }
@@ -23,10 +24,13 @@ public sealed class PatchReport
     public Dictionary<string, GroupReport> Groups { get; } =
         CreatureGroupCatalog.Groups.ToDictionary(g => g.Id, _ => new GroupReport());
     public int TotalWritten => Groups.Values.Sum(g => g.Written);
+    public int TotalWouldChange => Groups.Values.Sum(g => g.WouldChange);
 }
 
 public static class Patcher
 {
+    private sealed record PlannedChange(INpcGetter Npc, CreatureGroup Group, short Before, short Speed);
+
     public static PatchReport Run(IEnumerable<INpcGetter> winners,
         ILinkCache<ISkyrimMod, ISkyrimModGetter> cache, ISkyrimMod patch,
         Settings settings, TextWriter output)
@@ -43,11 +47,12 @@ public static class Patcher
                 ?? throw new ArgumentException($"Missing settings for {g.Name}.");
             if (value.SpeedMultiplier is < 1 or > short.MaxValue)
                 throw new ArgumentOutOfRangeException(nameof(settings),
-                    $"{g.Name}: SpeedMultiplier must be an integer from 1 to {short.MaxValue}.");
+                    $"{g.Name}: Speed must be an integer from 1 to {short.MaxValue}.");
             return (value.Enabled, Speed: (short)value.SpeedMultiplier);
         });
 
         var report = new PatchReport();
+        var plan = new List<PlannedChange>();
         foreach (INpcGetter npc in winners)
         {
             report.Inspected++;
@@ -79,12 +84,8 @@ public static class Patcher
             }
             short before = npc.Configuration.SpeedMultiplier;
             if (before == desired.Speed) { counts.AlreadyCorrect++; continue; }
-            var patchedNpc = patch.Npcs.GetOrAddAsOverride(npc);
-            patchedNpc.Configuration.SpeedMultiplier = desired.Speed;
-            counts.Written++;
-            if (settings.VerboseLogging)
-                output.WriteLine(FormattableString.Invariant(
-                    $"PATCH {npc.FormKey} [{npc.EditorID ?? "<no EditorID>"}] {group.Name}: {before} -> {desired.Speed}"));
+            plan.Add(new PlannedChange(npc, group, before, desired.Speed));
+            counts.WouldChange++;
 
             void LogSkip(string reason)
             {
@@ -92,16 +93,29 @@ public static class Patcher
                     output.WriteLine($"SKIP {npc.FormKey} [{npc.EditorID ?? "<no EditorID>"}]: {reason}");
             }
         }
+        foreach (PlannedChange change in plan)
+        {
+            if (!settings.DryRun)
+            {
+                var patchedNpc = patch.Npcs.GetOrAddAsOverride(change.Npc);
+                patchedNpc.Configuration.SpeedMultiplier = change.Speed;
+                report.Groups[change.Group.Id].Written++;
+            }
+            if (settings.VerboseLogging)
+                output.WriteLine(FormattableString.Invariant(
+                    $"{(settings.DryRun ? "WOULD CHANGE" : "PATCH")} {change.Npc.FormKey} [{change.Npc.EditorID ?? "<no EditorID>"}] {change.Group.Name}: {change.Before} -> {change.Speed}"));
+        }
         output.WriteLine("Creature Speed Patcher");
+        output.WriteLine($"mode = {(settings.DryRun ? "DRY RUN" : "NORMAL")}");
         output.WriteLine(FormattableString.Invariant($"Winning NPCs inspected: {report.Inspected}"));
         foreach (CreatureGroup group in CreatureGroupCatalog.Groups)
         {
             GroupReport c = report.Groups[group.Id];
             output.WriteLine(FormattableString.Invariant(
-                $"{group.Name}: matched={c.Matched}, written={c.Written}, already correct={c.AlreadyCorrect}, excluded={c.Excluded}, inherits stats={c.Inherited}, disabled={c.Disabled}"));
+                $"{group.Name}: matched={c.Matched}, would change={c.WouldChange}, written={c.Written}, already correct={c.AlreadyCorrect}, excluded={c.Excluded}, inherits stats={c.Inherited}, disabled={c.Disabled}"));
         }
         output.WriteLine(FormattableString.Invariant(
-            $"Deleted={report.Deleted}; unresolved/ambiguous/unsupported templates={report.TemplateSkips}; unmatched={report.Unmatched}; total overrides written={report.TotalWritten}"));
+            $"Deleted={report.Deleted}; unresolved/ambiguous/unsupported templates={report.TemplateSkips}; unmatched={report.Unmatched}; total overrides that would be written={report.TotalWouldChange}; actual overrides written={report.TotalWritten}"));
         return report;
     }
 }

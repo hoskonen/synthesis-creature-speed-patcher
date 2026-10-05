@@ -2,7 +2,7 @@
 
 A Skyrim SE Synthesis patcher that sets NPC `ACBS / Speed Multiplier` for six audited creature groups. Settings use **final stored values**, not factors applied to the winning value.
 
-| Group | Enabled by default | Speed Multiplier default |
+| Group | Enabled by default | Speed default |
 |---|---|---:|
 | Frostbite Spiders (normal, large, giant, snow) | Yes | 100 |
 | Dragonborn Imbued Spiders | Yes | 150 |
@@ -19,7 +19,11 @@ The catalog uses exact race FormKeys. Winning NPCs are inspected once; deleted r
 
 Matched NPCs with `Use Stats` set receive no child override. Template links and flags stay intact. For enabled stat owners, an override copies the winning record and changes only `Configuration.SpeedMultiplier`, and only when the value differs. Inputs are not mutated. EditorIDs/names are diagnostic only; factions are not matching gates. Duplicate catalog race keys are rejected at initialization.
 
-Speed settings must be positive integers from 1 through 32767, matching the pinned Mutagen `Int16` API. Every group's settings are validated before any write. Default logs contain per-group counts and overall skip totals. Enable **Verbose Record Logging** to see identities, changed speeds and template-skip reasons; template skips also include unrelated NPCs outside supported families because their effective race could not be established.
+**Speed** is the final NPC movement speed value: 250 means write 250 to `Configuration.SpeedMultiplier`. Vanilla is typically 100. The saved settings property remains `SpeedMultiplier` for compatibility with existing settings files.
+
+Speed settings must be positive integers from 1 through 32767, matching the pinned Mutagen `Int16` API. Every group's settings are validated before any write. Default logs contain the run mode, per-group matches, planned changes, actual writes, already-correct records and overall skip totals. Enable **Verbose Record Logging** to see identities, changed speeds and template-skip reasons; template skips also include unrelated NPCs outside supported families because their effective race could not be established.
+
+**Dry Run** defaults to off. Enable it to execute the same discovery, matching, template resolution, exclusion and stat-owner checks and build the same change plan, while leaving all output records untouched. Its summary reports how many overrides would be written and zero actual writes. Verbose logging is independent of dry run; either mode can produce per-record diagnostics or summaries only.
 
 ## Exclusions and intentional coverage
 

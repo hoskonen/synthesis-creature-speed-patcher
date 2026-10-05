@@ -41,6 +41,120 @@ public sealed class PatcherTests
     };
 
     [TestMethod]
+    public void DryRunCreatesNoOverridesAndDoesNotModifyExistingOutputRecords()
+    {
+        var mod = Mod();
+        var existing = AddNpc(mod);
+        AddNpc(mod);
+        using var cache = mod.ToImmutableLinkCache();
+        var patch = Mod("Output.esp");
+        var outputNpc = patch.Npcs.GetOrAddAsOverride(existing);
+        outputNpc.Configuration.SpeedMultiplier = 42;
+        outputNpc.Configuration.HealthOffset = 123;
+        var settings = Faster();
+        settings.DryRun = true;
+        var report = Patcher.Run(mod.Npcs, cache, patch, settings, new StringWriter());
+        Assert.AreEqual(1, patch.Npcs.Count);
+        Assert.AreEqual((short)42, outputNpc.Configuration.SpeedMultiplier);
+        Assert.AreEqual((short)123, outputNpc.Configuration.HealthOffset);
+        Assert.AreEqual(2, report.TotalWouldChange);
+        Assert.AreEqual(0, report.TotalWritten);
+        var (emptyPatch, emptyReport) = Run(mod, settings);
+        Assert.AreEqual(0, emptyPatch.Npcs.Count);
+        Assert.AreEqual(2, emptyReport.TotalWouldChange);
+        Assert.AreEqual((short)100, existing.Configuration.SpeedMultiplier);
+    }
+
+    [TestMethod]
+    public void DryRunAndNormalRunHaveIdenticalPlansAndDiscoveryCounts()
+    {
+        var mod = Mod();
+        foreach (var group in CreatureGroupCatalog.Groups)
+            AddNpc(mod, group.Races.First().ToString(), 50);
+        AddNpc(mod, speed: 250); // Already correct.
+        AddNpc(mod, identity: "038A33:Skyrim.esm"); // Explicit exclusion.
+        var provider = mod.Npcs.First();
+        var inherited = AddNpc(mod, "0131F3:Skyrim.esm");
+        inherited.Template.SetTo(provider.FormKey);
+        inherited.Configuration.TemplateFlags = NpcConfiguration.TemplateFlag.Traits | NpcConfiguration.TemplateFlag.Stats;
+        var ownStats = AddNpc(mod, "0131F3:Skyrim.esm");
+        ownStats.Template.SetTo(inherited.FormKey);
+        ownStats.Configuration.TemplateFlags = NpcConfiguration.TemplateFlag.Traits;
+        var broken = AddNpc(mod);
+        broken.Configuration.TemplateFlags = NpcConfiguration.TemplateFlag.Traits;
+        AddNpc(mod).IsDeleted = true;
+        AddNpc(mod, "0131F3:Skyrim.esm");
+        using var cache = mod.ToImmutableLinkCache();
+        var normalSettings = Faster();
+        normalSettings.ChaurusReapers.Enabled = false;
+        normalSettings.VerboseLogging = true;
+        var drySettings = Faster();
+        drySettings.ChaurusReapers.Enabled = false;
+        drySettings.VerboseLogging = true;
+        drySettings.DryRun = true;
+        var normalPatch = Mod("Normal.esp");
+        var dryPatch = Mod("Dry.esp");
+        var normalLog = new StringWriter();
+        var dryLog = new StringWriter();
+        var normal = Patcher.Run(mod.Npcs, cache, normalPatch, normalSettings, normalLog);
+        var dry = Patcher.Run(mod.Npcs, cache, dryPatch, drySettings, dryLog);
+        Assert.AreEqual(6, normal.TotalWritten);
+        Assert.AreEqual(normal.TotalWritten, dry.TotalWouldChange);
+        Assert.AreEqual(0, dry.TotalWritten);
+        Assert.AreEqual(0, dryPatch.Npcs.Count);
+        Assert.AreEqual(normal.Inspected, dry.Inspected);
+        Assert.AreEqual(normal.Deleted, dry.Deleted);
+        Assert.AreEqual(normal.TemplateSkips, dry.TemplateSkips);
+        Assert.AreEqual(normal.Unmatched, dry.Unmatched);
+        foreach (var group in CreatureGroupCatalog.Groups)
+        {
+            var a = normal.Groups[group.Id];
+            var b = dry.Groups[group.Id];
+            Assert.AreEqual(a.Matched, b.Matched);
+            Assert.AreEqual(a.WouldChange, b.WouldChange);
+            Assert.AreEqual(a.AlreadyCorrect, b.AlreadyCorrect);
+            Assert.AreEqual(a.Excluded, b.Excluded);
+            Assert.AreEqual(a.Inherited, b.Inherited);
+            Assert.AreEqual(a.Disabled, b.Disabled);
+        }
+        // Compare exact identities and before/after values, not just totals.
+        CollectionAssert.AreEqual(
+            normalLog.ToString().Split(Environment.NewLine).Where(l => l.StartsWith("PATCH ")).Select(l => l[6..]).ToArray(),
+            dryLog.ToString().Split(Environment.NewLine).Where(l => l.StartsWith("WOULD CHANGE ")).Select(l => l[13..]).ToArray());
+        StringAssert.Contains(dryLog.ToString(), "mode = DRY RUN");
+        StringAssert.Contains(dryLog.ToString(), "total overrides that would be written=6; actual overrides written=0");
+        StringAssert.Contains(dryLog.ToString(), "already correct=1");
+        StringAssert.Contains(dryLog.ToString(), "excluded=1");
+    }
+
+    [TestMethod]
+    public void VerboseLoggingIsIndependentOfDryRunAndPatchBehavior()
+    {
+        var mod = Mod();
+        var npc = AddNpc(mod);
+        using var cache = mod.ToImmutableLinkCache();
+        foreach (bool dryRun in new[] { false, true })
+        {
+            foreach (bool verbose in new[] { false, true })
+            {
+                var settings = Faster();
+                settings.DryRun = dryRun;
+                settings.VerboseLogging = verbose;
+                var patch = Mod("Output.esp");
+                var log = new StringWriter();
+                var report = Patcher.Run(mod.Npcs, cache, patch, settings, log);
+                Assert.AreEqual(1, report.TotalWouldChange);
+                Assert.AreEqual(dryRun ? 0 : 1, report.TotalWritten);
+                Assert.AreEqual(dryRun ? 0 : 1, patch.Npcs.Count);
+                if (!dryRun)
+                    Assert.AreEqual((short)250, patch.Npcs[npc.FormKey].Configuration.SpeedMultiplier);
+                Assert.AreEqual(verbose, log.ToString().Contains($"{npc.FormKey} ["));
+                Assert.AreEqual((short)100, npc.Configuration.SpeedMultiplier);
+            }
+        }
+    }
+
+    [TestMethod]
     public void EveryAuditedRaceMatchesOneGroupAndDefaultsProduceNoOverrides()
     {
         var mod = Mod();
